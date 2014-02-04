@@ -1,0 +1,64 @@
+<?php
+
+function team_load_multiple($team_ids, $reset = FALSE) {
+  return field_collection_item_load_multiple($team_ids, array(), $reset);
+}
+
+function team_load($team_id, $reset = FALSE) {
+  if ($field_teams = field_collection_item_load($team_id, $reset)) {
+    return $field_teams;
+  }
+}
+
+function team_create($host_entity) {
+  $field_teams = entity_create('field_collection_item', array(
+    'field_name' => 'field_teams',
+  ));
+
+  $field_teams->setHostEntity($host_entity->type, $host_entity);
+
+  return $field_teams;
+}
+
+function team_metadata_wrapper($team) {
+  return entity_metadata_wrapper('field_collection_item', $team);
+}
+
+function team_save($data, $host_entity = NULL) {
+  if (isset($data['team_id'])) {
+    $team = team_load($data['team_id']);
+  }
+  else {
+    $team = team_create($host_entity);
+  }
+
+  $team_metadata_wrapper = team_metadata_wrapper($team);
+
+  if (isset($data['result'])) {
+    $team_metadata_wrapper->field_result->set($data['result']);
+  }
+
+  if (isset($data['player_ids'])) {
+    foreach ($data['player_ids'] as $delta => $player_id) {
+      $team_metadata_wrapper->field_players[$delta]->set($player_id);
+    }
+  }
+
+  $team_metadata_wrapper->save();
+
+  return $team;
+}
+
+function team_players($team) {
+  $players = array();
+
+  $team_metadata_wrapper = team_metadata_wrapper($team);
+
+  foreach ($team_metadata_wrapper->field_players as $delta => $player_metadata_wrapper) {
+    $players[$delta] = $player_metadata_wrapper->value();
+  }
+
+  $players = $team_metadata_wrapper->field_players->value();
+
+  return $players;
+}

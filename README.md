@@ -1,4 +1,2 @@
-UFC
-===
-
-Ultimate Foosball Championship
+mikkonnoob.com
+===========

@@ -1,0 +1,70 @@
+<?php
+
+function match_load_multiple($match_ids, $reset = FALSE) {
+  return entity_load('match', $match_ids, array(), $reset);
+}
+
+function match_load($match_id, $reset = FALSE) {
+  if ($matches = match_load_multiple(array($match_id), $reset)) {
+    return reset($matches);
+  }
+}
+
+function match_create() {
+  $match = entity_create('match', array(
+    'type' => 'match',
+  ));
+
+  return $match;
+}
+
+function match_metadata_wrapper($match) {
+  return entity_metadata_wrapper('match', $match);
+}
+
+function match_save($data, $raffle = NULL) {
+  $match = match_create();
+
+  if (isset($data['match_id'])) {
+    $match = match_load($data['match_id']);
+  }
+
+  $match_metadata_wrapper = match_metadata_wrapper($match);
+
+  foreach ($data['teams'] as $delta => $team) {
+    $field_teams = $match_metadata_wrapper->field_teams[$delta]->value();
+
+    $data_2 = array(
+      'player_ids' => $team['player_ids'],
+    );
+
+    if ($field_teams) {
+      $data_2['team_id'] = $field_teams->item_id;
+    }
+
+    $field_teams = team_save($data_2, $match);
+
+    $match->field_teams[LANGUAGE_NONE][$delta]['value'] = $field_teams->item_id;
+  }
+
+  $match_metadata_wrapper->save();
+
+  if ($raffle) {
+    $raffle->field_matches[LANGUAGE_NONE][]['target_id'] = $match->id;
+    $raffle->save();
+  }
+
+  return $match;
+}
+
+function match_teams($match) {
+  $teams = array();
+
+  $match_metadata_wrapper = match_metadata_wrapper($match);
+
+  foreach ($match_metadata_wrapper->field_teams as $delta => $team_metadata_wrapper) {
+    $teams[$delta] = $team_metadata_wrapper->value();
+  }
+
+  return $teams;
+}

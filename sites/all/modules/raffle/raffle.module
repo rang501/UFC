@@ -1,0 +1,461 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function raffle_menu() {
+  $items = array();
+
+  $items['raffle'] = array(
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('raffle_form'),
+    'access callback' => TRUE,
+  );
+
+  $items['raffle/%'] = array(
+    'page callback' => 'raffle_page',
+    'page arguments' => array(1),
+    'access callback' => TRUE,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_forms().
+ */
+function raffle_forms($form_id, $args) {
+  $forms = array();
+
+  if (strpos($form_id, 'raffle_match_form_') !== FALSE) {
+    $forms[$form_id] = array(
+      'callback' => 'raffle_match_form',
+    );
+  }
+
+  return $forms;
+}
+
+function raffle_page($raffle_id) {
+  $raffle = raffle_load($raffle_id);
+
+  if (!$raffle) {
+    return drupal_not_found();
+  }
+
+  $output = '<h2>' . t('Participants') . '</h2>';
+  $output .= views_embed_view('participants', 'participants', $raffle->id);
+
+  $output .= '<h2>' . t('Matches') . '</h2>';
+
+  foreach (raffle_matches($raffle) as $match) {
+    $raffle_match_form = drupal_get_form('raffle_match_form_' . $match->id, $match->id);
+
+    $output .= drupal_render($raffle_match_form);
+  }
+
+  $raffle_generate_match_form = drupal_get_form('raffle_generate_match_form', $raffle->id);
+
+  $output .= drupal_render($raffle_generate_match_form);
+
+  $output .= '<h2>' . t('Statistics') . '</h2>';
+  $output .= views_embed_view('statistics', 'raffle', $raffle->id);
+
+  return $output;
+}
+
+function raffle_form($form, &$form_state) {
+  $options = array();
+
+  $players = player_list();
+
+  foreach ($players as $player) {
+    $options[$player->uid] = $player->name;
+  }
+
+  $form['participants'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Participants'),
+    '#required' => TRUE,
+    '#options' => $options,
+  );
+
+  $form['raffle'] = array(
+    '#type' => 'submit',
+    '#attributes' => array(
+      'class' => array('btn-primary'),
+    ),
+    '#value' => t('Raffle'),
+  );
+
+  return $form;
+}
+
+function raffle_form_validate($form, &$form_state) {
+  $form_state['values']['participants'] = array_filter($form_state['values']['participants']);
+
+  if (count($form_state['values']['participants']) < 4) {
+    form_error($form['participants'], t('You must select at least four participants.'));
+  }
+}
+
+function raffle_form_submit($form, &$form_state) {
+  $raffle = raffle_save(array(
+    'participants' => $form_state['values']['participants'],
+  ));
+
+//  $form_state = array(
+//    'values' => array(
+//      'raffle_id' => $raffle->id,
+//    ),
+//  );
+//
+//  drupal_form_submit('raffle_generate_match_form', $form_state);
+
+  $form_state['redirect'] = 'raffle/' . $raffle->id;
+}
+
+function raffle_generate_match_form($form, &$form_state, $raffle_id) {
+  $raffle = raffle_load($raffle_id);
+
+  $form['raffle_id'] = array(
+    '#type' => 'value',
+    '#value' => $raffle_id,
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#attributes' => array(
+      'class' => array('btn-primary'),
+    ),
+    '#value' => t('Generate next match'),
+  );
+
+  if (!_raffle_next_match_available($raffle)) {
+    $form['submit']['#disabled'] = TRUE;
+  }
+
+  return $form;
+}
+
+function _raffle_next_match_available($raffle) {
+  $available = array();
+
+  $matches = raffle_matches($raffle);
+
+  foreach ($matches as $match) {
+    foreach (match_teams($match) as $team) {
+      $team_metadata_wrapper = team_metadata_wrapper($team);
+
+      if ($team_metadata_wrapper->field_result->value()) {
+        $available[] = TRUE;
+      }
+    }
+  }
+
+  return count($available) == count($matches);
+}
+
+function raffle_generate_match_form_submit($form, &$form_state) {
+  $raffle = raffle_load($form_state['values']['raffle_id']);
+
+  $match = _raffle_generate_match($raffle);
+
+  match_save($match, $raffle);
+}
+
+function raffle_players_participated($raffle) {
+  $matches = raffle_matches($raffle);
+
+  $players = array();
+
+  foreach ($matches as $match) {
+    $teams = match_teams($match);
+
+    foreach ($teams as $team) {
+      $players = array_merge($players, team_players($team));
+    }
+  }
+
+  $player_ids = array();
+
+  foreach ($players as $player) {
+    $player_ids[$player->uid] = array(
+      'player_id' => $player->uid,
+      'matches_played' =>_raffle_players_participate_count($player->uid, $players),
+    );
+  }
+
+  return $player_ids;
+}
+
+function _raffle_players_participate_count($player_id, $players) {
+  $count = 0;
+
+  foreach ($players as $player) {
+    if ($player->uid == $player_id) {
+      $count++;
+    }
+  }
+
+  return $count;
+}
+
+function _raffle_generate_match($raffle) {
+  $match = array(
+    'teams' => array(),
+  );
+
+  $participants = raffle_participants($raffle);
+  $players_participated = raffle_players_participated($raffle);
+
+  foreach ($players_participated as $key => $p) {
+    if (!in_array($p['player_id'], $participants)) {
+      unset($players_participated[$key]);
+    }
+  }
+
+  $players = array_diff($participants, array_keys($players_participated));
+
+  shuffle($players);
+
+  if (count($players) < 4) {
+    function cmp($a, $b) {
+      return $a['matches_played'] - $b['matches_played'];
+    }
+
+    usort($players_participated, 'cmp');
+
+    $team_1 = array(
+      'player_ids' => array(),
+    );
+
+    $team_2 = array(
+      'player_ids' => array(),
+    );
+
+    $player_ids = array();
+
+    if (count($players) == 1) {
+      $player_ids = array();
+
+      $player_ids[] = $players[0];
+      $player_ids[] = $players_participated[0]['player_id'];
+      $player_ids[] = $players_participated[1]['player_id'];
+      $player_ids[] = $players_participated[2]['player_id'];
+
+      shuffle($player_ids);
+    }
+    elseif (count($players) == 2) {
+      $player_ids = array();
+
+      $player_ids[] = $players[0];
+      $player_ids[] = $players[1];
+      $player_ids[] = $players_participated[0]['player_id'];
+      $player_ids[] = $players_participated[1]['player_id'];
+
+      shuffle($player_ids);
+    }
+    elseif (count($players) > 2) {
+      $player_ids = array();
+
+      $player_ids[] = $players[0];
+      $player_ids[] = $players[1];
+      $player_ids[] = $players[2];
+      $player_ids[] = $players_participated[0]['player_id'];
+
+      shuffle($player_ids);
+    }
+    else {
+      $player_ids = array();
+
+      $player_ids[] = $players_participated[0]['player_id'];
+      $player_ids[] = $players_participated[1]['player_id'];
+      $player_ids[] = $players_participated[2]['player_id'];
+      $player_ids[] = $players_participated[3]['player_id'];
+
+      shuffle($player_ids);
+    }
+
+    $team_1['player_ids'][] = $player_ids[0];
+    $team_1['player_ids'][] = $player_ids[1];
+
+    $team_2['player_ids'][] = $player_ids[2];
+    $team_2['player_ids'][] = $player_ids[3];
+
+    $match['teams'] = array(
+      $team_1,
+      $team_2,
+    );
+  }
+  else {
+    $match['teams'][]['player_ids'] = array(
+      $players[0],
+      $players[1],
+    );
+
+    $match['teams'][]['player_ids'] = array(
+      $players[2],
+      $players[3],
+    );
+  }
+
+  return $match;
+}
+
+function raffle_match_form($form, &$form_state, $match_id) {
+  $match = match_load($match_id);
+
+  $form['match'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Match') . ' - ' . format_date($match->created, 'short'),
+  );
+
+  $winner = NULL;
+  $options = array();
+
+  foreach (match_teams($match) as $team) {
+    $team_metadata_wrapper = team_metadata_wrapper($team);
+
+    if ($team_metadata_wrapper->field_result->value()) {
+      $winner = $team->item_id;
+    }
+
+    $players = team_players($team);
+
+    $label = '';
+
+    foreach ($players as $player) {
+      $label .= $player->name . ', ';
+    }
+
+    $options[$team->item_id] = substr($label, 0, -2);
+  }
+
+  $form['match']['teams'] = array(
+    '#type' => 'radios',
+    '#required' => TRUE,
+    '#options' => $options,
+  );
+
+  if ($winner) {
+    $form['match']['teams']['#disabled'] = TRUE;
+    $form['match']['teams']['#default_value'] = $winner;
+  }
+
+  $form['match']['submit'] = array(
+    '#type' => 'submit',
+    '#attributes' => array(
+      'class' => array(
+        'btn-danger',
+        'btn-xs',
+      ),
+    ),
+    '#value' => t('Save the winning team'),
+  );
+
+  if ($winner) {
+    $form['match']['submit']['#disabled'] = TRUE;
+  }
+
+  return $form;
+}
+
+function raffle_match_form_submit($form, &$form_state) {
+  team_save(array(
+    'team_id' => $form_state['values']['teams'],
+    'result' => 1,
+  ));
+}
+
+function raffle_load_multiple($raffle_ids, $reset = FALSE) {
+  return entity_load('raffle', $raffle_ids, array(), $reset);
+}
+
+function raffle_load($raffle_id, $reset = FALSE) {
+  if ($raffles = raffle_load_multiple(array($raffle_id), $reset)) {
+    return reset($raffles);
+  }
+}
+
+function raffle_create() {
+  return entity_create('raffle', array(
+    'type' => 'raffle',
+  ));
+}
+
+function raffle_metadata_wrapper($raffle) {
+  return entity_metadata_wrapper('raffle', $raffle);
+}
+
+function raffle_save($data) {
+  $raffle = raffle_create();
+
+  if (isset($data['raffle_id'])) {
+    $raffle = raffle_load($data['raffle_id']);
+  }
+
+  foreach ($data['participants'] as $delta => $player_id) {
+    $raffle->field_participants[LANGUAGE_NONE][$delta]['target_id'] = $player_id;
+  }
+
+  $raffle_metadata_wrapper = raffle_metadata_wrapper($raffle);
+
+  if (isset($data['matches'])) {
+    foreach ($data['matches'] as $delta => $match) {
+      $field_matches = $raffle_metadata_wrapper->field_matches[$delta]->value();
+
+      if (!$field_matches) {
+        $field_matches = match_create();
+      }
+
+      $field_matches_metadata_wrapper = match_metadata_wrapper($field_matches);
+
+      foreach ($match['teams'] as $delta_2 => $team) {
+        $field_teams = $field_matches_metadata_wrapper->field_teams[$delta_2]->value();
+
+        if (!$field_teams) {
+          $field_teams = team_create($field_matches);
+        }
+
+        foreach ($team['player_ids'] as $delta_3 => $player_id) {
+          $field_teams->field_players[LANGUAGE_NONE][$delta_3]['target_id'] = $player_id;
+        }
+
+        $field_matches->field_teams[LANGUAGE_NONE][$delta_2]['value'] = $field_teams->item_id;
+      }
+
+      $field_matches->save();
+
+      $raffle->field_matches[LANGUAGE_NONE][$delta]['target_id'] = $field_matches->id;
+    }
+  }
+
+  $raffle->save();
+
+  return $raffle;
+}
+
+function raffle_matches($raffle) {
+  $matches = array();
+
+  $raffle_metadata_wrapper = raffle_metadata_wrapper($raffle);
+
+  foreach ($raffle_metadata_wrapper->field_matches as $delta => $match_metadata_wrapper) {
+    $matches[$delta] = $match_metadata_wrapper->value();
+  }
+
+  return $matches;
+}
+
+function raffle_participants($raffle) {
+  $participants = array();
+
+  $raffle_metadata_wrapper = raffle_metadata_wrapper($raffle);
+
+  foreach ($raffle_metadata_wrapper->field_participants as $delta => $participant_metadata_wrapper) {
+    $participants[$delta] = $participant_metadata_wrapper->uid->value();
+  }
+
+  return $participants;
+}

@@ -1,0 +1,18 @@
+<?php
+
+/**
+ * Implements hook_uninstall().
+ */
+function minify_uninstall() {
+  variable_del('minify_html');
+  variable_del('minify_js');
+  variable_del('minify_captured_js');
+  
+  $minify_dir = variable_get('file_public_path', conf_path() . '/files') . '/minify';
+  $files = file_scan_directory($minify_dir, '/.*\.*$/');
+  foreach($files as $key => $value) {
+    drupal_unlink($key);
+  }
+  
+  drupal_rmdir($minify_dir);
+}

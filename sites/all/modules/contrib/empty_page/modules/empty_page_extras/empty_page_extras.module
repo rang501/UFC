@@ -1,0 +1,11 @@
+<?php
+
+/**
+ * Implements hook_page_title_api().
+ */
+function empty_page_extras_page_title_api() {
+  return array(
+    'api' => 1,
+    'path' => drupal_get_path('module', 'empty_page_extras') . '/plugins/page_title',
+  );
+}

@@ -1,0 +1,44 @@
+<?php
+
+define('PLAYER_ROLE_NAME', 'player');
+
+function player_load_multiple($player_ids, $reset = FALSE) {
+  return user_load_multiple($player_ids, array(), $reset);
+}
+
+function player_load($player_id, $reset = FALSE) {
+  if ($user = user_load($player_id, $reset)) {
+    return $user;
+  }
+}
+
+function player_metadata_wrapper($player) {
+  return entity_metadata_wrapper('user', $player);
+}
+
+function player_list() {
+  $list = array();
+
+  $query = db_select('users_roles', 'ur');
+
+  $query->join('users', 'u', 'u.uid = ur.uid');
+  $query->join('role', 'r', 'r.rid = ur.rid');
+
+  $query->fields('ur', array('uid'))
+    ->condition('u.status', 1)
+    ->condition('r.name', PLAYER_ROLE_NAME);
+
+  $uids = $query
+    ->execute()
+    ->fetchAllKeyed(0, 0);
+
+  if ($uids) {
+    $players = player_load_multiple($uids);
+
+    foreach ($players as $player) {
+      $list[$player->uid] = $player;
+    }
+  }
+
+  return $list;
+}
