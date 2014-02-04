@@ -1,2 +1,2 @@
-mikkonnoob.com
-===========
+Ultimate Foosball CHampionship
+==============================
