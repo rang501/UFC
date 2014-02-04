@@ -48,7 +48,7 @@ function raffle_page($raffle_id) {
 
   $output .= '<h2>' . t('Matches') . '</h2>';
 
-  foreach (raffle_matches($raffle) as $match) {
+  foreach (raffle_matches($raffle->id) as $match) {
     $raffle_match_form = drupal_get_form('raffle_match_form_' . $match->id, $match->id);
 
     $output .= drupal_render($raffle_match_form);
@@ -141,7 +141,7 @@ function raffle_generate_match_form($form, &$form_state, $raffle_id) {
 function _raffle_next_match_available($raffle) {
   $available = array();
 
-  $matches = raffle_matches($raffle);
+  $matches = raffle_matches($raffle->id);
 
   foreach ($matches as $match) {
     foreach (match_teams($match) as $team) {
@@ -157,15 +157,13 @@ function _raffle_next_match_available($raffle) {
 }
 
 function raffle_generate_match_form_submit($form, &$form_state) {
-  $raffle = raffle_load($form_state['values']['raffle_id']);
+  $match = _raffle_generate_match($form_state['values']['raffle_id']);
 
-  $match = _raffle_generate_match($raffle);
-
-  match_save($match, $raffle);
+  match_save($match);
 }
 
 function raffle_players_participated($raffle) {
-  $matches = raffle_matches($raffle);
+  $matches = raffle_matches($raffle->id);
 
   $players = array();
 
@@ -201,10 +199,13 @@ function _raffle_players_participate_count($player_id, $players) {
   return $count;
 }
 
-function _raffle_generate_match($raffle) {
+function _raffle_generate_match($raffle_id) {
   $match = array(
+    'raffle_id' => $raffle_id,
     'teams' => array(),
   );
+
+  $raffle = raffle_load($raffle_id);
 
   $participants = raffle_participants($raffle);
   $players_participated = raffle_players_participated($raffle);
@@ -436,13 +437,21 @@ function raffle_save($data) {
   return $raffle;
 }
 
-function raffle_matches($raffle) {
+function raffle_matches($raffle_id) {
   $matches = array();
 
-  $raffle_metadata_wrapper = raffle_metadata_wrapper($raffle);
+  $query = new EntityFieldQuery();
 
-  foreach ($raffle_metadata_wrapper->field_matches as $delta => $match_metadata_wrapper) {
-    $matches[$delta] = $match_metadata_wrapper->value();
+  $query->entityCondition('entity_type', 'match')
+    ->entityCondition('bundle', 'match')
+    ->fieldCondition('field_raffle', 'target_id', $raffle_id);
+
+  $result = $query->execute();
+
+  if (isset($result['match'])) {
+    foreach (array_keys($result['match']) as $match_id) {
+      $matches[$match_id] = match_load($match_id);
+    }
   }
 
   return $matches;

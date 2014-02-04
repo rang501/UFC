@@ -22,7 +22,7 @@ function match_metadata_wrapper($match) {
   return entity_metadata_wrapper('match', $match);
 }
 
-function match_save($data, $raffle = NULL) {
+function match_save($data) {
   $match = match_create();
 
   if (isset($data['match_id'])) {
@@ -30,6 +30,10 @@ function match_save($data, $raffle = NULL) {
   }
 
   $match_metadata_wrapper = match_metadata_wrapper($match);
+
+  if (isset($data['raffle_id'])) {
+    $match_metadata_wrapper->field_raffle->set($data['raffle_id']);
+  }
 
   foreach ($data['teams'] as $delta => $team) {
     $field_teams = $match_metadata_wrapper->field_teams[$delta]->value();
@@ -48,11 +52,6 @@ function match_save($data, $raffle = NULL) {
   }
 
   $match_metadata_wrapper->save();
-
-  if ($raffle) {
-    $raffle->field_matches[LANGUAGE_NONE][]['target_id'] = $match->id;
-    $raffle->save();
-  }
 
   return $match;
 }
