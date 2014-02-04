@@ -1,5 +1,28 @@
 <?php
 
+/**
+ * Implements hook_entity_delet().
+ */
+function match_entity_delete($entity, $type) {
+  if ($type == 'raffle') {
+    $query = new EntityFieldQuery();
+
+    $query->entityCondition('entity_type', 'match')
+      ->entityCondition('bundle', 'match')
+      ->fieldCondition('field_raffle', 'target_id', $entity->id);
+
+    $result = $query->execute();
+
+    if (isset($result['match'])) {
+      match_delete_multiple(array_keys($result['match']));
+    }
+  }
+}
+
+function match_delete_multiple($match_ids) {
+  return entity_delete_multiple('match', $match_ids);
+}
+
 function match_load_multiple($match_ids, $reset = FALSE) {
   return entity_load('match', $match_ids, array(), $reset);
 }
