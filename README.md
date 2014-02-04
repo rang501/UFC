@@ -1,2 +1,2 @@
-Ultimate Foosball CHampionship
+Ultimate Foosball Championship
 ==============================
